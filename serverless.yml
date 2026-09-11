@@ -1,0 +1,45 @@
+service: malpe-auction-serverless
+
+frameworkVersion: '3'
+
+provider:
+  name: aws
+  runtime: nodejs20.x
+  region: ap-south-1 # Mumbai region (closest to Malpe/Udupi)
+  stage: ${opt:stage, 'dev'}
+  environment:
+    MONGODB_URI: ${env:MONGODB_URI}
+    JWT_SECRET: ${env:JWT_SECRET}
+    NODE_ENV: production
+
+functions:
+  # REST API Lambda Handler (via serverless-http wrapper)
+  api:
+    handler: backend/src/lambda.handler
+    events:
+      - http:
+          path: /{proxy+}
+          method: ANY
+          cors: true
+
+  # AWS API Gateway WebSocket Handler (Serverless WebSocket alternative for Socket.io)
+  websocketConnect:
+    handler: backend/src/wsHandler.connect
+    events:
+      - websocket:
+          route: $connect
+
+  websocketDisconnect:
+    handler: backend/src/wsHandler.disconnect
+    events:
+      - websocket:
+          route: $disconnect
+
+  websocketDefault:
+    handler: backend/src/wsHandler.default
+    events:
+      - websocket:
+          route: $default
+
+plugins:
+  - serverless-offline

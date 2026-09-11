@@ -1,0 +1,34 @@
+version: '3.8'
+
+services:
+  # MongoDB Database Instance
+  mongodb:
+    image: mongo:7.0
+    container_name: malpe_mongodb
+    restart: always
+    ports:
+      - "27017:27017"
+    environment:
+      MONGO_INITDB_DATABASE: malpe_auction
+    volumes:
+      - mongo_data:/data/db
+
+  # Node.js + Express + Socket.io Backend API
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: malpe_backend
+    restart: always
+    ports:
+      - "3000:3000"
+    environment:
+      - PORT=3000
+      - MONGODB_URI=mongodb://mongodb:27017/malpe_auction
+      - JWT_SECRET=malpe_harbor_super_secret_key_2026
+      - NODE_ENV=production
+    depends_on:
+      - mongodb
+
+volumes:
+  mongo_data:
