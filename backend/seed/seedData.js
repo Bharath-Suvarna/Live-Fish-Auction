@@ -4,6 +4,9 @@
  * and 100-1500 randomized bids simulating an 8 AM morning peak traffic spike.
  */
 
+const dns = require('dns');
+try { dns.setServers(['8.8.8.8', '8.8.4.4']); } catch (e) {}
+
 const mongoose = require('mongoose');
 const bcrypt = require('bcryptjs');
 require('dotenv').config({ path: '../.env' });
