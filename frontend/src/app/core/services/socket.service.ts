@@ -1,17 +1,17 @@
-import { Injectable } from '@angular/core';
-import { io, Socket } from 'socket.io-client';
+import { Injectable, NgZone, OnDestroy } from '@angular/core';
 import { Observable, BehaviorSubject, Subject } from 'rxjs';
 import { Boat, AuctionLot, Bid, PriceTrend } from '../models/models';
 
 @Injectable({
   providedIn: 'root'
 })
-export class SocketService {
-  private socket!: Socket;
+export class SocketService implements OnDestroy {
+  private ws: WebSocket | null = null;
+  private wsUrl = 'wss://bs7h77n0k8.execute-api.ap-south-1.amazonaws.com/prod';
   private isConnectedSubject = new BehaviorSubject<boolean>(false);
   public isConnected$ = this.isConnectedSubject.asObservable();
 
-  // Socket event Subjects
+  // Socket event Subjects matching original SocketService interface
   public stateSync$ = new Subject<{ activeLots: AuctionLot[]; recentBoats: Boat[]; recentTrends: PriceTrend[] }>();
   public boatArrived$ = new Subject<Boat>();
   public lotOpened$ = new Subject<AuctionLot>();
@@ -19,64 +19,176 @@ export class SocketService {
   public lotClosed$ = new Subject<AuctionLot>();
   public priceTrendUpdate$ = new Subject<PriceTrend>();
 
-  constructor() {
-    this.initSocket();
+  private reconnectTimer: any = null;
+  private pingTimer: any = null;
+  private isIntentionallyClosed = false;
+  private currentSubscribedLotId: string | null = null;
+
+  constructor(private ngZone: NgZone) {
+    this.initWebSocket();
   }
 
-  private initSocket(): void {
-    // Connect to /live namespace
-    this.socket = io('http://localhost:3000/live', {
-      transports: ['websocket', 'polling'],
-      reconnection: true,
-      reconnectionAttempts: Infinity,
-      reconnectionDelay: 1000
-    });
+  private initWebSocket(): void {
+    this.isIntentionallyClosed = false;
+    this.connect();
+  }
 
-    this.socket.on('connect', () => {
-      console.log('[Socket.io Client] Connected to /live namespace:', this.socket.id);
-      this.isConnectedSubject.next(true);
-    });
+  private connect(): void {
+    if (this.ws && (this.ws.readyState === WebSocket.OPEN || this.ws.readyState === WebSocket.CONNECTING)) {
+      return;
+    }
 
-    this.socket.on('disconnect', (reason) => {
-      console.warn('[Socket.io Client] Disconnected:', reason);
-      this.isConnectedSubject.next(false);
-    });
+    try {
+      console.log('[Native WebSocket Client] Connecting to:', this.wsUrl);
+      this.ws = new WebSocket(this.wsUrl);
 
-    this.socket.on('state:sync', (data) => {
-      console.log('[Socket.io Client] Received state:sync:', data);
-      this.stateSync$.next(data);
-    });
+      this.ws.onopen = () => {
+        console.log('[Native WebSocket Client] Connected to AWS API Gateway WebSocket');
+        this.ngZone.run(() => {
+          this.isConnectedSubject.next(true);
+        });
 
-    this.socket.on('boat:arrived', (boat: Boat) => {
-      this.boatArrived$.next(boat);
-    });
+        this.startPingInterval();
 
-    this.socket.on('lot:opened', (lot: AuctionLot) => {
-      this.lotOpened$.next(lot);
-    });
+        // Request state snapshot on connect
+        this.send({ action: 'state:sync' });
 
-    this.socket.on('bid:placed', (bidData: any) => {
-      this.bidPlaced$.next(bidData);
-    });
+        // Re-join active lot subscription if reconnected
+        if (this.currentSubscribedLotId) {
+          this.joinLot(this.currentSubscribedLotId);
+        }
+      };
 
-    this.socket.on('lot:closed', (lot: AuctionLot) => {
-      this.lotClosed$.next(lot);
-    });
+      this.ws.onmessage = (event: MessageEvent) => {
+        this.handleMessage(event.data);
+      };
 
-    this.socket.on('price:trend-update', (trend: PriceTrend) => {
-      this.priceTrendUpdate$.next(trend);
+      this.ws.onerror = (error) => {
+        console.warn('[Native WebSocket Client] Error:', error);
+      };
+
+      this.ws.onclose = (event) => {
+        console.warn('[Native WebSocket Client] Disconnected (code: ' + event.code + ', reason: ' + event.reason + ')');
+        this.stopPingInterval();
+        this.ngZone.run(() => {
+          this.isConnectedSubject.next(false);
+        });
+
+        if (!this.isIntentionallyClosed) {
+          this.scheduleReconnect();
+        }
+      };
+    } catch (err) {
+      console.error('[Native WebSocket Client] Connection initialization error:', err);
+      this.scheduleReconnect();
+    }
+  }
+
+  private handleMessage(rawData: string): void {
+    try {
+      const msg = JSON.parse(rawData);
+      console.log('[Native WebSocket Client] Message received:', msg);
+
+      const event = msg.event;
+      const data = msg.data !== undefined ? msg.data : msg;
+
+      this.ngZone.run(() => {
+        switch (event) {
+          case 'state:sync':
+            this.stateSync$.next(data);
+            break;
+          case 'boat:arrived':
+            this.boatArrived$.next(data);
+            break;
+          case 'lot:opened':
+            this.lotOpened$.next(data);
+            break;
+          case 'bid:placed':
+            this.bidPlaced$.next(data);
+            break;
+          case 'lot:closed':
+            this.lotClosed$.next(data);
+            break;
+          case 'price:trend-update':
+            this.priceTrendUpdate$.next(data);
+            break;
+          case 'pong':
+            // Heartbeat response acknowledged
+            break;
+          default:
+            console.log('[Native WebSocket Client] Received unhandled event:', event, data);
+            break;
+        }
+      });
+    } catch (e) {
+      console.warn('[Native WebSocket Client] Failed to parse message:', rawData);
+    }
+  }
+
+  private send(payload: any): void {
+    if (this.ws && this.ws.readyState === WebSocket.OPEN) {
+      this.ws.send(JSON.stringify(payload));
+    } else {
+      console.warn('[Native WebSocket Client] Cannot send payload, WebSocket is not open:', payload);
+    }
+  }
+
+  private startPingInterval(): void {
+    this.stopPingInterval();
+    // Send ping every 45 seconds to prevent AWS API Gateway 10-minute idle connection timeout
+    this.ngZone.runOutsideAngular(() => {
+      this.pingTimer = setInterval(() => {
+        if (this.ws && this.ws.readyState === WebSocket.OPEN) {
+          this.ws.send(JSON.stringify({ action: 'ping' }));
+        }
+      }, 45000);
+    });
+  }
+
+  private stopPingInterval(): void {
+    if (this.pingTimer) {
+      clearInterval(this.pingTimer);
+      this.pingTimer = null;
+    }
+  }
+
+  private scheduleReconnect(): void {
+    if (this.reconnectTimer) {
+      clearTimeout(this.reconnectTimer);
+    }
+    this.ngZone.runOutsideAngular(() => {
+      this.reconnectTimer = setTimeout(() => {
+        console.log('[Native WebSocket Client] Attempting reconnection...');
+        this.connect();
+      }, 3000);
     });
   }
 
   joinLot(lotId: string): void {
-    if (this.socket) {
-      this.socket.emit('join:lot', lotId);
-    }
+    this.currentSubscribedLotId = lotId;
+    this.send({ action: 'join:lot', lotId });
   }
 
   leaveLot(lotId: string): void {
-    if (this.socket) {
-      this.socket.emit('leave:lot', lotId);
+    if (this.currentSubscribedLotId === lotId) {
+      this.currentSubscribedLotId = null;
     }
+    this.send({ action: 'leave:lot', lotId });
+  }
+
+  disconnect(): void {
+    this.isIntentionallyClosed = true;
+    this.stopPingInterval();
+    if (this.reconnectTimer) {
+      clearTimeout(this.reconnectTimer);
+    }
+    if (this.ws) {
+      this.ws.close();
+      this.ws = null;
+    }
+  }
+
+  ngOnDestroy(): void {
+    this.disconnect();
   }
 }

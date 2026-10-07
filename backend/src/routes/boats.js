@@ -2,7 +2,7 @@ const express = require('express');
 const router = express.Router();
 const repo = require('../config/repository');
 const { verifyToken, requireRole } = require('../middleware/authMiddleware');
-const { broadcastBoatArrived } = require('../socket/socketHandler');
+const { broadcastBoatArrived } = require('../wsBroadcaster');
 
 /**
  * GET /api/boats

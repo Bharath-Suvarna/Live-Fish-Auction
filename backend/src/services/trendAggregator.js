@@ -1,5 +1,5 @@
 const repo = require('../config/repository');
-const { broadcastPriceTrend } = require('../socket/socketHandler');
+const { broadcastPriceTrend } = require('../wsBroadcaster');
 
 const aggregatePriceTrends = async () => {
   try {

@@ -1,12 +1,10 @@
 const express = require('express');
 const http = require('http');
-const { Server } = require('socket.io');
 const cors = require('cors');
 require('dotenv').config();
 
 const connectDB = require('./config/db');
 const loggerMiddleware = require('./middleware/loggerMiddleware');
-const { initSocketHandler } = require('./socket/socketHandler');
 const { startTrendAggregatorService } = require('./services/trendAggregator');
 
 const authRoutes = require('./routes/auth');
@@ -45,17 +43,6 @@ app.get('/api/health', (req, res) => {
   });
 });
 
-// Socket.io Setup
-const io = new Server(server, {
-  cors: {
-    origin: '*',
-    methods: ['GET', 'POST']
-  },
-  transports: ['websocket', 'polling']
-});
-
-initSocketHandler(io);
-
 // Connect DB and start server
 const PORT = process.env.PORT || 3000;
 
@@ -66,7 +53,6 @@ connectDB().then(() => {
   server.listen(PORT, () => {
     console.log(`====================================================`);
     console.log(`[Malpe Harbor Backend] Server running on port ${PORT}`);
-    console.log(`[WebSocket] Namespace /live initialized`);
     console.log(`====================================================`);
   });
 });

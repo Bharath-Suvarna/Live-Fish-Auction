@@ -8,7 +8,7 @@ import { AuthService } from './auth.service';
   providedIn: 'root'
 })
 export class ApiService {
-  private baseUrl = 'http://localhost:3000/api';
+  private baseUrl = 'https://riq4zdxhqb.execute-api.ap-south-1.amazonaws.com/prod/api';
 
   constructor(private http: HttpClient, private authService: AuthService) {}
 

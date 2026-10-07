@@ -7,7 +7,7 @@ import { User } from '../models/models';
   providedIn: 'root'
 })
 export class AuthService {
-  private apiUrl = 'http://localhost:3000/api/auth';
+  private apiUrl = 'https://riq4zdxhqb.execute-api.ap-south-1.amazonaws.com/prod/api/auth';
   private currentUserSubject = new BehaviorSubject<User | null>(this.loadStoredUser());
   public currentUser$ = this.currentUserSubject.asObservable();
 

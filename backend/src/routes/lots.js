@@ -6,7 +6,7 @@ const {
   broadcastLotOpened, 
   broadcastBidPlaced, 
   broadcastLotClosed 
-} = require('../socket/socketHandler');
+} = require('../wsBroadcaster');
 
 /**
  * GET /api/lots

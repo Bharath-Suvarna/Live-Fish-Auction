@@ -18,3 +18,10 @@ npm-debug.log*
 Thumbs.db
 .vscode/
 .idea/
+
+# Serverless & Test Artifacts
+.serverless/
+jmeter_results/
+*.bak
+*-backup/
+

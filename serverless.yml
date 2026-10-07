@@ -1,16 +1,49 @@
 service: malpe-auction-serverless
 
 frameworkVersion: '3'
+useDotenv: true
+
+package:
+  patterns:
+    - '!frontend/**'
+    - '!frontend-socketio-backup/**'
+    - '!backend-socketio-backup/**'
+    - '!scratch/**'
+    - '!backend/scratch/**'
+    - 'backend/**'
+    - 'node_modules/**'
 
 provider:
   name: aws
   runtime: nodejs20.x
   region: ap-south-1 # Mumbai region (closest to Malpe/Udupi)
   stage: ${opt:stage, 'dev'}
+  timeout: 30
   environment:
-    MONGODB_URI: ${env:MONGODB_URI}
-    JWT_SECRET: ${env:JWT_SECRET}
+    MONGODB_URI: ${env:MONGODB_URI, 'mongodb+srv://bharthmalpe_db_user:qTLpN8E7uCpPHUfU@cluster0.jcvbkd7.mongodb.net/malpe_auction?retryWrites=true&w=majority'}
+    JWT_SECRET: ${env:JWT_SECRET, 'malpe_harbor_super_secret_key_2026'}
+    CONNECTIONS_TABLE: malpe-websocket-connections-${self:provider.stage}
+    WEBSOCKET_API_ENDPOINT: https://bs7h77n0k8.execute-api.ap-south-1.amazonaws.com/${self:provider.stage}
     NODE_ENV: production
+  iam:
+    role:
+      statements:
+        - Effect: Allow
+          Action:
+            - dynamodb:PutItem
+            - dynamodb:DeleteItem
+            - dynamodb:GetItem
+            - dynamodb:Scan
+            - dynamodb:Query
+            - dynamodb:UpdateItem
+          Resource:
+            - !GetAtt WebSocketConnectionsTable.Arn
+            - !Join ['', [!GetAtt WebSocketConnectionsTable.Arn, '/index/*']]
+        - Effect: Allow
+          Action:
+            - execute-api:ManageConnections
+          Resource:
+            - 'arn:aws:execute-api:*:*:*/*/@connections/*'
 
 functions:
   # REST API Lambda Handler (via serverless-http wrapper)
@@ -22,7 +55,7 @@ functions:
           method: ANY
           cors: true
 
-  # AWS API Gateway WebSocket Handler (Serverless WebSocket alternative for Socket.io)
+  # AWS API Gateway WebSocket Handlers for Real-Time Bidding
   websocketConnect:
     handler: backend/src/wsHandler.connect
     events:
@@ -40,6 +73,31 @@ functions:
     events:
       - websocket:
           route: $default
+
+resources:
+  Resources:
+    WebSocketConnectionsTable:
+      Type: AWS::DynamoDB::Table
+      Properties:
+        TableName: malpe-websocket-connections-${self:provider.stage}
+        AttributeDefinitions:
+          - AttributeName: connectionId
+            AttributeType: S
+          - AttributeName: lotId
+            AttributeType: S
+        KeySchema:
+          - AttributeName: connectionId
+            KeyType: HASH
+        GlobalSecondaryIndexes:
+          - IndexName: LotIdIndex
+            KeySchema:
+              - AttributeName: lotId
+                KeyType: HASH
+              - AttributeName: connectionId
+                KeyType: RANGE
+            Projection:
+              ProjectionType: ALL
+        BillingMode: PAY_PER_REQUEST
 
 plugins:
   - serverless-offline
